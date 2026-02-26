@@ -1,0 +1,20 @@
+To read in Donor SRAs:
+
+1. Start by copying link into VS-Code and get your new Pipeline_Project_Samples folder
+
+For each of the four sample files: 
+2. Go to the NCBI website, filter for SRA and search the run number associated with the SRA 
+3. Once in the SRA, scroll down to runs and click the run number - this will send you to a new page 
+4. At this new page press data access, and scroll down to SRA archival data
+5. Copy paste the link for SRA Normalized. 
+6. in your terminal diectory type wget <link> 
+    this will download a zip file for each read 
+7. Use fasterq-dump./ SRA_number to unzip files
+8. you will get two fastq files for each SRA number: a forward and reverse 
+9. Repeat for each SRA run number
+      SRR5660030
+      SRR5660033
+      SRR5660044
+      SRR5660045
+
+
