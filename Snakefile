@@ -8,31 +8,34 @@
 sample = ["SRR5660030","SRR5660033","SRR5660044","SRR5660045"]
 rule all:
     input:
-        expand("results/spades_assemblies/{sample}", sample=sample),
+        expand("results/sam_fastq_out/{sample}.fastq", sample = sample),
+        expand("results/spades_assemblies/{sample}/contigs.fasta", sample=sample),
         expand("results/longest_contigs/{sample}_contigs.txt", sample = sample),
-        expand("results/blast_results/blast_{sample}.csv", sample = sample)
+        "results/blast_output.txt",
+        "PipelineReport_Samples.txt"
+
 
 #getting genome from NCBI 
 rule downloading_genome:  
     output:
-        directory("dataset/GCF_000845245.1"), 
+        "dataset/ncbi_dataset/data/GCF_000845245.1/cds_from_genomic.fna",
+        "dataset/ncbi_dataset/data/GCF_000845245.1/GCF_000845245.1_ViralProj14559_genomic.fna",
+        "dataset/ncbi_dataset/data/GCF_000845245.1/protein.faa"
+
 
 # the second line "datasets..." was provided by NCBI to get the genome information for Human herpesvirus 5
 # adding cds and protein sequences to different output file to make it easier to find later 
     shell:
         """
-        mkdir -p dataset/GCF_000845245.1
+        mkdir -p dataset
         datasets download genome accession GCF_000845245.1 --include cds,protein,genome --filename "dataset/ncbi_dataset.zip" 
         unzip -o "dataset/ncbi_dataset.zip" -d dataset/
-        cp dataset/ncbi_dataset/data/GCF_000845245.1/cds_from_genomic.fna {output}
-        cp dataset/ncbi_dataset/data/GCF_000845245.1/GCF_000845245.1_ViralProj14559_genomic.fna {output}
-        cp dataset/ncbi_dataset/data/GCF_000845245.1/protein.faa {output}
-    
+        
         """
 # make a list of all coding sequences within the genome and identify how many coding sequences there are 
 rule make_list: 
     input:
-        "dataset/GCF_000845245.1/cds_from_genomic.fna"
+        "dataset/ncbi_dataset/data/GCF_000845245.1/cds_from_genomic.fna"
     output: 
         "dataset/output.fasta",
         "dataset/count_cds.txt"
@@ -101,19 +104,18 @@ rule kallisto_quantify:
         d2_6in_r = "SRR5660045_2.fastq"
 
     output:
-        d1_2 = directory("results/SRR5660030"), #have one output folder within the results for each timepoint (ex. donor 1 day 2... )
-        d1_6 = directory("results/SRR5660033"),
-        d2_2 = directory("results/SRR5660044"),
-        d2_6 = directory("results/SRR5660045")
-
+        d1_2 = "results/SRR5660030/abundance.h5",
+        d1_6 = "results/SRR5660033/abundance.h5",
+        d2_2 = "results/SRR5660044/abundance.h5",
+        d2_6 = "results/SRR5660045/abundance.h5"
     shell:
         # running kallisto: allows you to identify how many transcripts (from samples) you have for each section of a genome agains a refrence genome (index)
         # results in abundance reads for each sample 
         """
-        kallisto quant -i {input.idx} -o {output.d1_2} -b 30 {input.d1_2in_f} {input.d1_2in_r} 
-        kallisto quant -i {input.idx} -o {output.d1_6} -b 30 {input.d1_6in_f} {input.d1_6in_r}
-        kallisto quant -i {input.idx} -o {output.d2_2} -b 30 {input.d2_2in_f} {input.d2_2in_r}
-        kallisto quant -i {input.idx} -o {output.d2_6} -b 30 {input.d2_6in_f} {input.d2_6in_r}
+        kallisto quant -i {input.idx} -o results/SRR5660030 -b 30 {input.d1_2in_f} {input.d1_2in_r} 
+        kallisto quant -i {input.idx} -o results/SRR5660033 -b 30 {input.d1_6in_f} {input.d1_6in_r}
+        kallisto quant -i {input.idx} -o results/SRR5660044 -b 30 {input.d2_2in_f} {input.d2_2in_r}
+        kallisto quant -i {input.idx} -o results/SRR5660045 -b 30 {input.d2_6in_f} {input.d2_6in_r}
         """
 rule make_sleuth_table: 
     input: 
@@ -156,12 +158,12 @@ rule bowtie2_genome_index:
         genome = "dataset/ncbi_dataset/data/GCF_000845245.1/GCF_000845245.1_ViralProj14559_genomic.fna",
     
     output: 
-        directory("results/bowtie_data_hcmv")
+       "results/bowtie_data_hcmv/GCF_index.1.bt2"
     shell: 
         #write the directory before hand to make sure output is written beforehand 
        """
-       mkdir -p {output} 
-       bowtie2-build {input.genome} {output}/GCF_index
+       mkdir -p results/bowtie_data_hcmv 
+       bowtie2-build {input.genome} results/bowtie_data_hcmv/GCF_index
        """ 
        # I needed to do the /GCF_index to make sure that the files are written as GCF_index.(bt...) - it didn't work without this 
 
@@ -199,22 +201,17 @@ rule running_bowtie_2:
 #converting the sam output of bowtie2 to a fastq 
 rule sam_to_fastq:
     input: 
-        "results/bowtie_data_out/SRR5660030.sam",
-        "results/bowtie_data_out/SRR5660033.sam",
-        "results/bowtie_data_out/SRR5660044.sam",
-        "results/bowtie_data_out/SRR5660045.sam"
+        "results/bowtie_data_out/{sample}.sam",
+
     output: 
-        directory("results/sam_fastq_out")
+        "results/sam_fastq_out/{sample}.fastq"
     shell: 
         # made the directory first to have a file for snakefile to refrence back to 
         # used a for loop to change the name of each file 
         # base=$(basename $name .sam) I got from AI I couldn't figure out how to do it a different way 
         """
-        mkdir -p {output}
-        for name in {input}; do 
-            base=$(basename $name .sam)
-            samtools fastq $name -o {output}/$base.fastq
-        done
+        mkdir -p results/sam_fastq_out
+        samtools fastq {input} -o {output}
         """
         #using samtools I go from stack overflow 
 
@@ -264,10 +261,14 @@ rule running_spades:
         "results/sam_fastq_out/{sample}.fastq",
 
     output:
-        directory("results/spades_assemblies/{sample}") #this line was used for the rule all so it would recognize the sample 
+        "results/spades_assemblies/{sample}/contigs.fasta" #this line was used for the rule all so it would recognize the sample 
 
     shell:
-        "spades.py -k 127 -t 2 --only-assembler -s {input} -o {output}" # code structure was from class, not sure if -t rule was acutally needed 
+        """
+        mkdir -p results/spades_assemblies/{wildcards.sample}
+        spades.py -k 127 -t 2 --only-assembler -s {input} -o results/spades_assemblies/{wildcards.sample}
+        """
+        # code structure was from class, not sure if -t rule was acutally needed 
         # kmers were specificed in instructions 
 
 # sorting contigs with python to find the longest contig for blast 
@@ -325,6 +326,8 @@ rule do_blast:
         # max_target_seqs will only output the top 5 sequences
 
 rule make_blast_outfile:
+    input: 
+        expand("results/blast_results/blast_{sample}.csv", sample = sample)
     # using a for loop again to make sure that the blast files are combined into one file for the PipelineReport
     output: 
         "results/blast_output.txt"
@@ -354,11 +357,11 @@ rule make_final_file:
        blast_output = "results/blast_output.txt"
 
     output:
-        "PipelineReport.txt"
+        "PipelineReport_Samples.txt"
 
     shell:
         """
-            cat {input.cds_count_file} >> {output}
+            cat {input.cds_count_file} > {output}
             echo >> {output}
             echo >> {output}
             cat {input.sleuth_output} >> {output}
